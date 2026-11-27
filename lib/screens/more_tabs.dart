@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:math';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/models.dart';
@@ -305,13 +304,9 @@ class _ExportBackupTabState extends State<ExportBackupTab> {
                     ),
                     OutlinedButton(
                       onPressed: () async {
-                        final res = await FilePicker.platform.pickFiles(
-                          withData: true,
-                          type: FileType.custom,
-                          allowedExtensions: ['json'],
-                        );
-                        if (res == null || res.files.isEmpty || res.files.first.bytes == null) return;
-                        final msg = await c.restoreBackupJson(utf8.decode(res.files.first.bytes!));
+                        final files = await NativeBridge.pickFiles(allowMultiple: false);
+                        if (files.isEmpty) return;
+                        final msg = await c.restoreBackupJson(utf8.decode(files.first.bytes));
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
                         }

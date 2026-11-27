@@ -10,7 +10,6 @@ dependencies:
   flutter:
     sdk: flutter
   shared_preferences: ^2.3.2
-  file_picker: ^8.1.2
   syncfusion_flutter_pdf: ^27.1.58
   archive: ^3.6.1
   xml: ^6.5.0

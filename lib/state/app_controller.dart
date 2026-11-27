@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../services/file_extractor.dart';
@@ -136,13 +135,8 @@ class AppController extends ChangeNotifier {
   }
 
   Future<String> importPickedFiles({bool forceSheet = false, bool useGemini = false}) async {
-    final res = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      withData: true,
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'pptx', 'ppsx', 'potx', 'docx', 'txt', 'md', 'csv', 'tsv', 'json', 'html', 'htm'],
-    );
-    if (res == null || res.files.isEmpty) return '';
+    final files = await NativeBridge.pickFiles(allowMultiple: true);
+    if (files.isEmpty) return '';
 
     busy = true;
     notifyListeners();
@@ -155,9 +149,8 @@ class AppController extends ChangeNotifier {
     final existingQ = folder.questions.map((q) => McqParser.normalizeStem(q.stem)).toSet();
 
     try {
-      for (final file in res.files) {
+      for (final file in files) {
         final bytes = file.bytes;
-        if (bytes == null) continue;
         try {
           final text = await FileExtractor.extractText(file.name, bytes);
 

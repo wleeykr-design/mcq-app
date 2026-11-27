@@ -1,5 +1,11 @@
 import 'package:flutter/services.dart';
 
+class PickedNativeFile {
+  final String name;
+  final Uint8List bytes;
+  PickedNativeFile(this.name, this.bytes);
+}
+
 class NativeBridge {
   static const MethodChannel _ch = MethodChannel('com.medquiz.mcqstudio/native');
 
@@ -85,6 +91,28 @@ class NativeBridge {
           false;
     } catch (_) {
       return false;
+    }
+  }
+
+  static Future<List<PickedNativeFile>> pickFiles({bool allowMultiple = true}) async {
+    try {
+      final raw = await _ch.invokeMethod<List<dynamic>>('pickFiles', {
+        'allowMultiple': allowMultiple,
+      });
+      if (raw == null) return [];
+      final out = <PickedNativeFile>[];
+      for (final item in raw) {
+        if (item is Map) {
+          final name = item['name']?.toString() ?? 'file.bin';
+          final bytes = item['bytes'];
+          if (bytes is Uint8List) {
+            out.add(PickedNativeFile(name, bytes));
+          }
+        }
+      }
+      return out;
+    } catch (_) {
+      return [];
     }
   }
 

@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.print.PrintAttributes
 import android.print.PrintManager
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -31,11 +32,13 @@ class MainActivity : FlutterActivity() {
         private const val CHANNEL = "com.medquiz.mcqstudio/native"
         private const val SAVE_FILE_REQ = 2101
         private const val NOTIF_PERM_REQ = 2102
+        private const val PICK_FILES_REQ = 2103
     }
 
     private var channel: MethodChannel? = null
     private var pendingSaveContent: String = ""
     private var pendingSaveResult: MethodChannel.Result? = null
+    private var pendingPickResult: MethodChannel.Result? = null
     private var printWebView: WebView? = null
     private var pendingOpenTab: String? = null
 
@@ -105,6 +108,10 @@ class MainActivity : FlutterActivity() {
                     val filename = call.argument<String>("filename") ?: "batch27-export.txt"
                     val content = call.argument<String>("content") ?: ""
                     startSaveDocument(filename, content, result)
+                }
+                "pickFiles" -> {
+                    val allowMultiple = call.argument<Boolean>("allowMultiple") ?: true
+                    startPickFiles(allowMultiple, result)
                 }
                 "printHtml" -> {
                     val html = call.argument<String>("html") ?: ""
@@ -281,10 +288,64 @@ class MainActivity : FlutterActivity() {
         }.start()
     }
 
+    private fun startPickFiles(allowMultiple: Boolean, result: MethodChannel.Result) {
+        pendingPickResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, allowMultiple)
+        }
+        try {
+            startActivityForResult(Intent.createChooser(intent, "اختر الملفات"), PICK_FILES_REQ)
+        } catch (e: Exception) {
+            pendingPickResult?.success(emptyList<Map<String, Any>>())
+            pendingPickResult = null
+            Toast.makeText(this, "تعذر فتح منتقي الملفات", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String {
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) {
+                        val name = cursor.getString(idx)
+                        if (!name.isNullOrEmpty()) return name
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return uri.lastPathSegment ?: "file.bin"
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == SAVE_FILE_REQ) {
+        if (requestCode == PICK_FILES_REQ) {
+            val out = ArrayList<Map<String, Any>>()
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                val uris = ArrayList<Uri>()
+                val clip = data.clipData
+                if (clip != null && clip.itemCount > 0) {
+                    for (i in 0 until clip.itemCount) {
+                        uris.add(clip.getItemAt(i).uri)
+                    }
+                } else if (data.data != null) {
+                    uris.add(data.data!!)
+                }
+                for (u in uris) {
+                    try {
+                        val bytes = contentResolver.openInputStream(u)?.use { it.readBytes() }
+                        if (bytes != null) {
+                            out.add(mapOf("name" to queryDisplayName(u), "bytes" to bytes))
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            pendingPickResult?.success(out)
+            pendingPickResult = null
+        } else if (requestCode == SAVE_FILE_REQ) {
             if (resultCode == Activity.RESULT_OK && data?.data != null) {
                 try {
                     contentResolver.openOutputStream(data.data!!)?.use { os ->
