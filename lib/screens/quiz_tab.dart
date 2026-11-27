@@ -540,7 +540,7 @@ class _QuizTabState extends State<QuizTab> {
       onTap: () {
         if (multi) {
           if (_mode == 'study' && _submitted.contains(q.uid)) return;
-          final cur = [...(_answers[q.uid] ?? [])];
+          final cur = <int>[...(_answers[q.uid] ?? const <int>[])];
           if (cur.contains(oi)) cur.remove(oi);
           else cur.add(oi);
           cur.sort();
