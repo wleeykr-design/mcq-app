@@ -68,6 +68,11 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> signOutGoogle() async {
+    await gemini.signOut();
+    notifyListeners();
+  }
+
   void playSound(String kind) {
     if (!data.soundEnabled) return;
     NativeBridge.playSound(kind);

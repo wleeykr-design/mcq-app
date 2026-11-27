@@ -169,8 +169,7 @@ class _GeminiAuthDialogState extends State<GeminiAuthDialog> {
                     if (cfg.isSignedIn)
                       TextButton.icon(
                         onPressed: () async {
-                          await widget.controller.gemini.signOut();
-                          widget.controller.notifyListeners();
+                          await widget.controller.signOutGoogle();
                         },
                         icon: const Icon(Icons.logout, size: 18, color: BatchColors.err),
                         label: const Text('خروج', style: TextStyle(color: BatchColors.err)),

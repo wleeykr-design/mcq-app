@@ -272,11 +272,13 @@ class McqParser {
     var inAnswerKeySection = false;
 
     void pushCur() {
-      if (curQ != null && (curQ!.stem.trim().isNotEmpty || curQ!.options.isNotEmpty)) {
-        if (activeCase != null && activeCase!.vignette.trim().isEmpty && activeCase!.title.isNotEmpty) {
-          activeCase!.vignette = activeCase!.title;
+      final q = curQ;
+      final ac = activeCase;
+      if (q != null && (q.stem.trim().isNotEmpty || q.options.isNotEmpty)) {
+        if (ac != null && ac.vignette.trim().isEmpty && ac.title.isNotEmpty) {
+          ac.vignette = ac.title;
         }
-        questions.add(curQ!);
+        questions.add(q);
       }
       curQ = null;
       curOptIdx = -1;
@@ -468,8 +470,9 @@ class McqParser {
         continue;
       }
 
-      if (activeCase != null && curQ == null) {
-        activeCase!.vignette = (activeCase!.vignette.isNotEmpty ? '${activeCase!.vignette}\n' : '') + line;
+      final ac = activeCase;
+      if (ac != null && curQ == null) {
+        ac.vignette = (ac.vignette.isNotEmpty ? '${ac.vignette}\n' : '') + line;
         continue;
       }
 
