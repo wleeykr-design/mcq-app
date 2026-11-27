@@ -1,0 +1,30 @@
+name: batch27_flutter
+description: Batch 27 MCQ Studio — Medical MCQ organizer, study plan, quiz engine, 3D flashcards, PDF/PPTX analyzer & Gemini Google OAuth2 client.
+publish_to: 'none'
+version: 6.0.0+15
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  shared_preferences: ^2.3.2
+  file_picker: ^8.1.2
+  syncfusion_flutter_pdf: ^27.1.58
+  archive: ^3.6.1
+  xml: ^6.5.0
+  http: ^1.2.2
+  crypto: ^3.0.5
+  url_launcher: ^6.3.1
+  app_links: ^6.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/logo.png

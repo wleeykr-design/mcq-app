@@ -1,0 +1,11 @@
+.DS_Store
+.dart_tool/
+.packages
+.pub/
+build/
+android/.gradle/
+android/local.properties
+android/app/medquiz.keystore
+*.keystore
+*.jks
+*.iml
