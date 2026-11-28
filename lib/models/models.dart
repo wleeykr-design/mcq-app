@@ -72,8 +72,10 @@ class McqQuestion {
   int uid;
   int sourceNum;
   String sourceName;
+  String sourceCitation;
   String stem;
   List<String> options;
+  List<String> optionRationales;
   List<int> answerIndices;
   int answerIndex;
   bool isMulti;
@@ -88,8 +90,10 @@ class McqQuestion {
     required this.uid,
     this.sourceNum = 0,
     this.sourceName = 'ملف',
+    this.sourceCitation = '',
     required this.stem,
     required this.options,
+    List<String>? optionRationales,
     required this.answerIndices,
     this.answerIndex = -1,
     this.isMulti = false,
@@ -99,7 +103,8 @@ class McqQuestion {
     this.explanation = '',
     this.srs,
     QuestionStats? stats,
-  }) : stats = stats ?? QuestionStats();
+  })  : optionRationales = optionRationales ?? const [],
+        stats = stats ?? QuestionStats();
 
   bool get hasIssue => options.length < 2 || getCorrectIndices().isEmpty;
   bool get isMultiAnswer => getCorrectIndices().length > 1 || isMulti;
@@ -178,6 +183,7 @@ class McqQuestion {
 
   factory McqQuestion.fromJson(Map<String, dynamic> j) {
     final opts = (j['options'] as List?)?.map((e) => e.toString()).toList() ?? [];
+    final rats = (j['optionRationales'] as List?)?.map((e) => e.toString()).toList() ?? const <String>[];
     var ansArr = (j['answerIndices'] as List?)
             ?.map((e) => (e as num).toInt())
             .where((i) => i >= 0 && i < opts.length)
@@ -192,8 +198,10 @@ class McqQuestion {
       uid: (j['uid'] as num?)?.toInt() ?? DateTime.now().microsecondsSinceEpoch,
       sourceNum: (j['sourceNum'] as num?)?.toInt() ?? 0,
       sourceName: j['sourceName']?.toString() ?? 'ملف',
+      sourceCitation: j['sourceCitation']?.toString() ?? '',
       stem: j['stem']?.toString() ?? '',
       options: opts,
+      optionRationales: rats,
       answerIndices: ansArr,
       answerIndex: ansArr.isNotEmpty ? ansArr.first : -1,
       isMulti: j['isMulti'] == true || ansArr.length > 1,
@@ -210,8 +218,10 @@ class McqQuestion {
         'uid': uid,
         'sourceNum': sourceNum,
         'sourceName': sourceName,
+        'sourceCitation': sourceCitation,
         'stem': stem,
         'options': options,
+        'optionRationales': optionRationales,
         'answerIndices': answerIndices,
         'answerIndex': answerIndex,
         'isMulti': isMulti,
@@ -258,6 +268,7 @@ class FlashcardItem {
   String back;
   String hint;
   String topic;
+  String sourceCitation;
   String status; // learning | review | mastered
   bool starred;
   int createdAt;
@@ -268,6 +279,7 @@ class FlashcardItem {
     required this.back,
     this.hint = '',
     this.topic = '',
+    this.sourceCitation = '',
     this.status = 'learning',
     this.starred = false,
     int? createdAt,
@@ -279,6 +291,7 @@ class FlashcardItem {
         back: j['back']?.toString() ?? '',
         hint: j['hint']?.toString() ?? '',
         topic: j['topic']?.toString() ?? '',
+        sourceCitation: j['sourceCitation']?.toString() ?? '',
         status: j['status']?.toString() ?? 'learning',
         starred: j['starred'] == true,
         createdAt: (j['createdAt'] as num?)?.toInt(),
@@ -290,9 +303,365 @@ class FlashcardItem {
         'back': back,
         'hint': hint,
         'topic': topic,
+        'sourceCitation': sourceCitation,
         'status': status,
         'starred': starred,
         'createdAt': createdAt,
+      };
+}
+
+// ============================================================================
+// LEARNKATA-INSPIRED PEDAGOGICAL MODELS (Sources, MicroLessons, Games, Mastery)
+// ============================================================================
+
+class SourceChunk {
+  String id;
+  String sourceName;
+  String citation; // e.g., "Lecture.pdf • Page 3" or "Deck.pptx • Slide 5"
+  String sectionTitle;
+  String text;
+
+  SourceChunk({
+    required this.id,
+    required this.sourceName,
+    required this.citation,
+    required this.sectionTitle,
+    required this.text,
+  });
+
+  factory SourceChunk.fromJson(Map<String, dynamic> j) => SourceChunk(
+        id: j['id']?.toString() ?? '',
+        sourceName: j['sourceName']?.toString() ?? '',
+        citation: j['citation']?.toString() ?? '',
+        sectionTitle: j['sectionTitle']?.toString() ?? '',
+        text: j['text']?.toString() ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'sourceName': sourceName,
+        'citation': citation,
+        'sectionTitle': sectionTitle,
+        'text': text,
+      };
+}
+
+class SourceDocument {
+  String id;
+  String name;
+  String fileType;
+  int uploadedAtMs;
+  List<SourceChunk> chunks;
+
+  SourceDocument({
+    required this.id,
+    required this.name,
+    this.fileType = 'text',
+    int? uploadedAtMs,
+    List<SourceChunk>? chunks,
+  })  : uploadedAtMs = uploadedAtMs ?? DateTime.now().millisecondsSinceEpoch,
+        chunks = chunks ?? [];
+
+  factory SourceDocument.fromJson(Map<String, dynamic> j) => SourceDocument(
+        id: j['id']?.toString() ?? '',
+        name: j['name']?.toString() ?? 'Source',
+        fileType: j['fileType']?.toString() ?? 'text',
+        uploadedAtMs: (j['uploadedAtMs'] as num?)?.toInt(),
+        chunks: (j['chunks'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .map(SourceChunk.fromJson)
+                .toList() ??
+            [],
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'fileType': fileType,
+        'uploadedAtMs': uploadedAtMs,
+        'chunks': chunks.map((e) => e.toJson()).toList(),
+      };
+}
+
+class MatchPairItem {
+  String id;
+  String left;
+  String right;
+  String citation;
+
+  MatchPairItem({
+    required this.id,
+    required this.left,
+    required this.right,
+    this.citation = '',
+  });
+
+  factory MatchPairItem.fromJson(Map<String, dynamic> j) => MatchPairItem(
+        id: j['id']?.toString() ?? '',
+        left: j['left']?.toString() ?? '',
+        right: j['right']?.toString() ?? '',
+        citation: j['citation']?.toString() ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'left': left,
+        'right': right,
+        'citation': citation,
+      };
+}
+
+class FillBlankItem {
+  String id;
+  String sentenceWithBlank; // uses "_____"
+  String answer;
+  List<String> choices; // clickable chips including answer
+  String hint;
+  String citation;
+
+  FillBlankItem({
+    required this.id,
+    required this.sentenceWithBlank,
+    required this.answer,
+    required this.choices,
+    this.hint = '',
+    this.citation = '',
+  });
+
+  factory FillBlankItem.fromJson(Map<String, dynamic> j) => FillBlankItem(
+        id: j['id']?.toString() ?? '',
+        sentenceWithBlank: j['sentenceWithBlank']?.toString() ?? '',
+        answer: j['answer']?.toString() ?? '',
+        choices: (j['choices'] as List?)?.map((e) => e.toString()).toList() ?? [],
+        hint: j['hint']?.toString() ?? '',
+        citation: j['citation']?.toString() ?? '',
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'sentenceWithBlank': sentenceWithBlank,
+        'answer': answer,
+        'choices': choices,
+        'hint': hint,
+        'citation': citation,
+      };
+}
+
+class MicroLesson {
+  String id;
+  int orderIndex;
+  String title;
+  String topic;
+  String objective;
+  String summary;
+  List<String> keyTakeaways;
+  String sourceCitation;
+  String sourceExcerpt;
+  int estimatedMinutes;
+  List<McqQuestion> quizzes;
+  List<FlashcardItem> flashcards;
+  List<MatchPairItem> matchPairs;
+  List<FillBlankItem> fillBlanks;
+  bool completed;
+  int bestQuizPct;
+  bool gameCompleted;
+  int stars;
+
+  MicroLesson({
+    required this.id,
+    required this.orderIndex,
+    required this.title,
+    required this.topic,
+    required this.objective,
+    required this.summary,
+    List<String>? keyTakeaways,
+    this.sourceCitation = '',
+    this.sourceExcerpt = '',
+    this.estimatedMinutes = 4,
+    List<McqQuestion>? quizzes,
+    List<FlashcardItem>? flashcards,
+    List<MatchPairItem>? matchPairs,
+    List<FillBlankItem>? fillBlanks,
+    this.completed = false,
+    this.bestQuizPct = 0,
+    this.gameCompleted = false,
+    this.stars = 0,
+  })  : keyTakeaways = keyTakeaways ?? [],
+        quizzes = quizzes ?? [],
+        flashcards = flashcards ?? [],
+        matchPairs = matchPairs ?? [],
+        fillBlanks = fillBlanks ?? [];
+
+  factory MicroLesson.fromJson(Map<String, dynamic> j) => MicroLesson(
+        id: j['id']?.toString() ?? '',
+        orderIndex: (j['orderIndex'] as num?)?.toInt() ?? 0,
+        title: j['title']?.toString() ?? '',
+        topic: j['topic']?.toString() ?? 'General',
+        objective: j['objective']?.toString() ?? '',
+        summary: j['summary']?.toString() ?? '',
+        keyTakeaways: (j['keyTakeaways'] as List?)?.map((e) => e.toString()).toList() ?? [],
+        sourceCitation: j['sourceCitation']?.toString() ?? '',
+        sourceExcerpt: j['sourceExcerpt']?.toString() ?? '',
+        estimatedMinutes: (j['estimatedMinutes'] as num?)?.toInt() ?? 4,
+        quizzes: (j['quizzes'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .map(McqQuestion.fromJson)
+                .toList() ??
+            [],
+        flashcards: (j['flashcards'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .map(FlashcardItem.fromJson)
+                .toList() ??
+            [],
+        matchPairs: (j['matchPairs'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .map(MatchPairItem.fromJson)
+                .toList() ??
+            [],
+        fillBlanks: (j['fillBlanks'] as List?)
+                ?.whereType<Map<String, dynamic>>()
+                .map(FillBlankItem.fromJson)
+                .toList() ??
+            [],
+        completed: j['completed'] == true,
+        bestQuizPct: (j['bestQuizPct'] as num?)?.toInt() ?? 0,
+        gameCompleted: j['gameCompleted'] == true,
+        stars: (j['stars'] as num?)?.toInt() ?? 0,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'orderIndex': orderIndex,
+        'title': title,
+        'topic': topic,
+        'objective': objective,
+        'summary': summary,
+        'keyTakeaways': keyTakeaways,
+        'sourceCitation': sourceCitation,
+        'sourceExcerpt': sourceExcerpt,
+        'estimatedMinutes': estimatedMinutes,
+        'quizzes': quizzes.map((e) => e.toJson()).toList(),
+        'flashcards': flashcards.map((e) => e.toJson()).toList(),
+        'matchPairs': matchPairs.map((e) => e.toJson()).toList(),
+        'fillBlanks': fillBlanks.map((e) => e.toJson()).toList(),
+        'completed': completed,
+        'bestQuizPct': bestQuizPct,
+        'gameCompleted': gameCompleted,
+        'stars': stars,
+      };
+}
+
+class TopicMastery {
+  String topic;
+  int mcqAttempts;
+  int mcqCorrect;
+  int fcReviews;
+  int fcMastered;
+  int gameAttempts;
+  int gameCorrect;
+  int lastUpdatedMs;
+  List<String> citations;
+
+  TopicMastery({
+    required this.topic,
+    this.mcqAttempts = 0,
+    this.mcqCorrect = 0,
+    this.fcReviews = 0,
+    this.fcMastered = 0,
+    this.gameAttempts = 0,
+    this.gameCorrect = 0,
+    this.lastUpdatedMs = 0,
+    List<String>? citations,
+  }) : citations = citations ?? [];
+
+  int get totalAttempts => mcqAttempts + fcReviews + gameAttempts;
+  int get totalCorrect => mcqCorrect + fcMastered + gameCorrect;
+
+  int get masteryPct {
+    if (totalAttempts <= 0) return 0;
+    return ((totalCorrect / totalAttempts) * 100).round().clamp(0, 100);
+  }
+
+  /// 'weak' (<65), 'developing' (65..84), 'strong' (>=85)
+  String get level {
+    final pct = masteryPct;
+    if (totalAttempts == 0 || pct < 65) return 'weak';
+    if (pct < 85) return 'developing';
+    return 'strong';
+  }
+
+  void record({required bool isCorrect, bool isFlashcard = false, bool isGame = false, String? citation}) {
+    if (isFlashcard) {
+      fcReviews++;
+      if (isCorrect) fcMastered++;
+    } else if (isGame) {
+      gameAttempts++;
+      if (isCorrect) gameCorrect++;
+    } else {
+      mcqAttempts++;
+      if (isCorrect) mcqCorrect++;
+    }
+    lastUpdatedMs = DateTime.now().millisecondsSinceEpoch;
+    if (citation != null && citation.trim().isNotEmpty && !citations.contains(citation.trim())) {
+      citations.add(citation.trim());
+    }
+  }
+
+  factory TopicMastery.fromJson(Map<String, dynamic> j) => TopicMastery(
+        topic: j['topic']?.toString() ?? 'General',
+        mcqAttempts: (j['mcqAttempts'] as num?)?.toInt() ?? 0,
+        mcqCorrect: (j['mcqCorrect'] as num?)?.toInt() ?? 0,
+        fcReviews: (j['fcReviews'] as num?)?.toInt() ?? 0,
+        fcMastered: (j['fcMastered'] as num?)?.toInt() ?? 0,
+        gameAttempts: (j['gameAttempts'] as num?)?.toInt() ?? 0,
+        gameCorrect: (j['gameCorrect'] as num?)?.toInt() ?? 0,
+        lastUpdatedMs: (j['lastUpdatedMs'] as num?)?.toInt() ?? 0,
+        citations: (j['citations'] as List?)?.map((e) => e.toString()).toList() ?? [],
+      );
+
+  Map<String, dynamic> toJson() => {
+        'topic': topic,
+        'mcqAttempts': mcqAttempts,
+        'mcqCorrect': mcqCorrect,
+        'fcReviews': fcReviews,
+        'fcMastered': fcMastered,
+        'gameAttempts': gameAttempts,
+        'gameCorrect': gameCorrect,
+        'lastUpdatedMs': lastUpdatedMs,
+        'citations': citations,
+      };
+}
+
+class TutorMessage {
+  String role; // 'user' | 'tutor'
+  String text;
+  List<String> citations;
+  String? suggestedPrompt;
+  int timestampMs;
+
+  TutorMessage({
+    required this.role,
+    required this.text,
+    List<String>? citations,
+    this.suggestedPrompt,
+    int? timestampMs,
+  })  : citations = citations ?? [],
+        timestampMs = timestampMs ?? DateTime.now().millisecondsSinceEpoch;
+
+  factory TutorMessage.fromJson(Map<String, dynamic> j) => TutorMessage(
+        role: j['role']?.toString() ?? 'tutor',
+        text: j['text']?.toString() ?? '',
+        citations: (j['citations'] as List?)?.map((e) => e.toString()).toList() ?? [],
+        suggestedPrompt: j['suggestedPrompt']?.toString(),
+        timestampMs: (j['timestampMs'] as num?)?.toInt(),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'role': role,
+        'text': text,
+        'citations': citations,
+        'suggestedPrompt': suggestedPrompt,
+        'timestampMs': timestampMs,
       };
 }
 
@@ -304,6 +673,10 @@ class SubjectFolder {
   List<ClinicalCase> cases;
   List<FlashcardItem> flashcards;
   List<int> lastWrongIds;
+  List<SourceDocument> sources;
+  List<MicroLesson> lessons;
+  Map<String, TopicMastery> topicMastery;
+  List<TutorMessage> tutorHistory;
 
   SubjectFolder({
     required this.id,
@@ -313,10 +686,18 @@ class SubjectFolder {
     List<ClinicalCase>? cases,
     List<FlashcardItem>? flashcards,
     List<int>? lastWrongIds,
+    List<SourceDocument>? sources,
+    List<MicroLesson>? lessons,
+    Map<String, TopicMastery>? topicMastery,
+    List<TutorMessage>? tutorHistory,
   })  : questions = questions ?? [],
         cases = cases ?? [],
         flashcards = flashcards ?? [],
-        lastWrongIds = lastWrongIds ?? [];
+        lastWrongIds = lastWrongIds ?? [],
+        sources = sources ?? [],
+        lessons = lessons ?? [],
+        topicMastery = topicMastery ?? {},
+        tutorHistory = tutorHistory ?? [];
 
   ClinicalCase? caseById(String? caseId) {
     if (caseId == null || caseId.isEmpty) return null;
@@ -326,27 +707,57 @@ class SubjectFolder {
     return null;
   }
 
-  factory SubjectFolder.fromJson(Map<String, dynamic> j) => SubjectFolder(
-        id: j['id']?.toString() ?? 'f1',
-        name: j['name']?.toString() ?? 'عام (General)',
-        colorHex: j['color']?.toString() ?? '#0D9488',
-        questions: (j['questions'] as List?)
-                ?.whereType<Map<String, dynamic>>()
-                .map(McqQuestion.fromJson)
-                .toList() ??
-            [],
-        cases: (j['cases'] as List?)
-                ?.whereType<Map<String, dynamic>>()
-                .map(ClinicalCase.fromJson)
-                .toList() ??
-            [],
-        flashcards: (j['flashcards'] as List?)
-                ?.whereType<Map<String, dynamic>>()
-                .map(FlashcardItem.fromJson)
-                .toList() ??
-            [],
-        lastWrongIds: (j['lastWrongIds'] as List?)?.map((e) => (e as num).toInt()).toList() ?? [],
-      );
+  List<SourceChunk> get allChunks => [
+        for (final s in sources) ...s.chunks,
+      ];
+
+  factory SubjectFolder.fromJson(Map<String, dynamic> j) {
+    final tm = <String, TopicMastery>{};
+    if (j['topicMastery'] is Map) {
+      (j['topicMastery'] as Map).forEach((k, v) {
+        if (v is Map<String, dynamic>) {
+          tm[k.toString()] = TopicMastery.fromJson(v);
+        }
+      });
+    }
+    return SubjectFolder(
+      id: j['id']?.toString() ?? 'f1',
+      name: j['name']?.toString() ?? 'عام (General)',
+      colorHex: j['color']?.toString() ?? '#0D9488',
+      questions: (j['questions'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(McqQuestion.fromJson)
+              .toList() ??
+          [],
+      cases: (j['cases'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(ClinicalCase.fromJson)
+              .toList() ??
+          [],
+      flashcards: (j['flashcards'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(FlashcardItem.fromJson)
+              .toList() ??
+          [],
+      lastWrongIds: (j['lastWrongIds'] as List?)?.map((e) => (e as num).toInt()).toList() ?? [],
+      sources: (j['sources'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(SourceDocument.fromJson)
+              .toList() ??
+          [],
+      lessons: (j['lessons'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(MicroLesson.fromJson)
+              .toList() ??
+          [],
+      topicMastery: tm,
+      tutorHistory: (j['tutorHistory'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(TutorMessage.fromJson)
+              .toList() ??
+          [],
+    );
+  }
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -356,6 +767,10 @@ class SubjectFolder {
         'cases': cases.map((e) => e.toJson()).toList(),
         'flashcards': flashcards.map((e) => e.toJson()).toList(),
         'lastWrongIds': lastWrongIds,
+        'sources': sources.map((e) => e.toJson()).toList(),
+        'lessons': lessons.map((e) => e.toJson()).toList(),
+        'topicMastery': topicMastery.map((k, v) => MapEntry(k, v.toJson())),
+        'tutorHistory': tutorHistory.take(40).map((e) => e.toJson()).toList(),
       };
 }
 
@@ -521,6 +936,7 @@ class AppDataState {
   Map<String, StudyUnitProgress> studyProgress;
   bool soundEnabled;
   bool darkMode;
+  String tutorLanguage; // 'ar' | 'en' | 'bilingual'
   ReminderSettings reminder;
 
   AppDataState({
@@ -543,6 +959,7 @@ class AppDataState {
     Map<String, StudyUnitProgress>? studyProgress,
     this.soundEnabled = true,
     this.darkMode = false,
+    this.tutorLanguage = 'bilingual',
     ReminderSettings? reminder,
   })  : folders = folders ?? [SubjectFolder(id: 'f1', name: 'عام (General)', colorHex: '#0D9488')],
         quizHistory = quizHistory ?? [],
@@ -590,6 +1007,7 @@ class AppDataState {
         'studyProgress': studyProgress.map((k, v) => MapEntry(k, v.toJson())),
         'soundEnabled': soundEnabled,
         'darkMode': darkMode,
+        'tutorLanguage': tutorLanguage,
         'reminder': reminder.toJson(),
       };
 
@@ -632,6 +1050,7 @@ class AppDataState {
       studyProgress: sp,
       soundEnabled: j['soundEnabled'] != false,
       darkMode: j['darkMode'] == true,
+      tutorLanguage: j['tutorLanguage']?.toString() ?? 'bilingual',
       reminder: j['reminder'] is Map<String, dynamic>
           ? ReminderSettings.fromJson(j['reminder'])
           : ReminderSettings(),

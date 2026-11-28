@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../state/app_controller.dart';
 import '../theme/app_theme.dart';
+import '../widgets/socratic_tutor_sheet.dart';
 
 class QuizTab extends StatefulWidget {
   final AppController controller;
@@ -132,6 +133,7 @@ class _QuizTabState extends State<QuizTab> {
         attempted++;
         final ok = q.isUserAnswerCorrect(ans);
         q.recordOutcome(ok, now);
+        c.recordTopicAttempt(q.topic, isCorrect: ok, citation: q.sourceCitation);
         if (ok) {
           correct++;
           byDiff[dKey]![0]++;
@@ -438,6 +440,22 @@ class _QuizTabState extends State<QuizTab> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text('💡 التعليل: ${q.explanation}', style: const TextStyle(fontSize: 13)),
+                    ),
+                  ],
+                  if (!q.isUserAnswerCorrect(chosen)) ...[
+                    const SizedBox(height: 8),
+                    FilledButton.tonalIcon(
+                      onPressed: () {
+                        final pickedLabel = chosen.isNotEmpty ? q.options[chosen.first] : '';
+                        openSocraticTutorSheet(
+                          context,
+                          controller: c,
+                          wrongContext: 'Quiz MCQ: "${q.stem}". Student selected "$pickedLabel". Topic: ${q.topic}. Source: ${q.sourceCitation}',
+                          initialQuestion: 'أخطأت في هذا السؤال، ساعدني أفهم المفهوم خطوة بخطوة بتلميح دون حرق الجواب',
+                        );
+                      },
+                      icon: const Text('🧠'),
+                      label: const Text('اطلب تلميحاً سقراطياً من المعلم'),
                     ),
                   ],
                 ],

@@ -18,6 +18,9 @@ class BatchColors {
   static const Color darkCard = Color(0xFF0F2035);
   static const Color darkCard2 = Color(0xFF152A44);
   static const Color darkBorder = Color(0xFF213A58);
+
+  static Color mutedColor(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? Colors.white70 : Colors.black54;
 }
 
 class AppTheme {

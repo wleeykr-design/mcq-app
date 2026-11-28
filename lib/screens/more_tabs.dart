@@ -6,9 +6,12 @@ import '../models/models.dart';
 import '../services/export_service.dart';
 import '../services/mcq_parser.dart';
 import '../services/native_bridge.dart';
+import '../services/source_curriculum_engine.dart';
 import '../services/storage_service.dart';
 import '../state/app_controller.dart';
 import '../theme/app_theme.dart';
+import '../widgets/socratic_tutor_sheet.dart';
+import 'lesson_player_screen.dart';
 
 class SheetGraderTab extends StatefulWidget {
   final AppController controller;
@@ -129,7 +132,19 @@ class AnalyticsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = controller;
-    final qs = c.folder.questions.where((q) => !q.hasIssue && !q.isMultiAnswer).toList();
+    final folder = c.folder;
+    final topicsList = folder.topicMastery.values.toList()
+      ..sort((a, b) => a.masteryPct.compareTo(b.masteryPct));
+
+    final weakList = topicsList.where((t) => t.level == 'weak').toList();
+    final devList = topicsList.where((t) => t.level == 'developing').toList();
+    final strongList = topicsList.where((t) => t.level == 'strong').toList();
+
+    final totalAtt = topicsList.fold<int>(0, (s, e) => s + e.totalAttempts);
+    final totalCorr = topicsList.fold<int>(0, (s, e) => s + e.totalCorrect);
+    final overallPct = totalAtt == 0 ? 0 : ((totalCorr / totalAtt) * 100).round();
+
+    final qs = folder.questions.where((q) => !q.hasIssue && !q.isMultiAnswer).toList();
     final counts = [0, 0, 0, 0];
     for (final q in qs) {
       final a = q.getCorrectIndices().first;
@@ -140,6 +155,171 @@ class AnalyticsTab extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
+        // Strengths & Weaknesses Mastery Hero Dashboard
+        Card(
+          color: BatchColors.navy,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('🎯 لوحة الإتقان ونقاط الضعف',
+                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800)),
+                          Text('تحليل الدقة حسب الموضوع عبر MCQ والبطاقات والألعاب',
+                              style: TextStyle(color: Color(0xFF99F6E4), fontSize: 11.5)),
+                        ],
+                      ),
+                    ),
+                    CircleAvatar(
+                      radius: 24,
+                      backgroundColor: BatchColors.teal,
+                      child: Text('$overallPct%', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 13)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _kpiBadge('🔴 ضعيف', '${weakList.length}', BatchColors.err),
+                    const SizedBox(width: 8),
+                    _kpiBadge('🟡 قيد التطوير', '${devList.length}', BatchColors.warn),
+                    const SizedBox(width: 8),
+                    _kpiBadge('🟢 متقن', '${strongList.length}', BatchColors.ok),
+                  ],
+                ),
+                if (weakList.isNotEmpty || topicsList.any((t) => t.masteryPct < 75)) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: BatchColors.err, padding: const EdgeInsets.symmetric(vertical: 12)),
+                    onPressed: () {
+                      final rem = SourceCurriculumEngine.buildTargetedWeaknessLesson(folder);
+                      if (rem == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('لا توجد أسئلة/بطاقات كافية للمراجعة بعد.')),
+                        );
+                        return;
+                      }
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => LessonPlayerScreen(
+                            controller: c,
+                            lesson: rem,
+                            isTargetedRemediation: true,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.auto_fix_high_rounded),
+                    label: const Text('توليد وبدء جلسة تقوية تلقائية لنقاط الضعف ⚡', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+
+        // Per-Topic Mastery Breakdown Cards
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('📚 خريطة المواضيع (${topicsList.length})', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                const SizedBox(height: 8),
+                if (topicsList.isEmpty)
+                  const Text('ابدأ بحل الأسئلة أو بطاقات الاسترجاع ليتم تحليل نقاط قوتك وضعفك تلقائياً 📊',
+                      style: TextStyle(fontSize: 13))
+                else
+                  ...topicsList.map((tm) {
+                    final col = tm.level == 'strong'
+                        ? BatchColors.ok
+                        : (tm.level == 'developing' ? BatchColors.warn : BatchColors.err);
+                    final label = tm.level == 'strong' ? 'قوة' : (tm.level == 'developing' ? 'متوسط' : 'نقطة ضعف');
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: col.withOpacity(0.45)),
+                        color: col.withOpacity(0.06),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(tm.topic, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5)),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(999)),
+                                child: Text('${tm.masteryPct}% • $label',
+                                    style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800)),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          LinearProgressIndicator(
+                            value: tm.masteryPct / 100.0,
+                            minHeight: 7,
+                            borderRadius: BorderRadius.circular(99),
+                            color: col,
+                            backgroundColor: col.withOpacity(0.18),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Text(
+                                'MCQ: ${tm.mcqCorrect}/${tm.mcqAttempts}  •  بطاقات: ${tm.fcMastered}/${tm.fcReviews}  •  ألعاب: ${tm.gameCorrect}/${tm.gameAttempts}',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              const Spacer(),
+                              TextButton(
+                                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: Size.zero),
+                                onPressed: () => openSocraticTutorSheet(
+                                  context,
+                                  controller: c,
+                                  initialQuestion: 'ساعدني على فهم موضوع "${tm.topic}" بطريقة سقراطية تدريجية لأنني أحتاج تقوية فيه',
+                                ),
+                                child: const Text('🧠 معلم', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
+                              ),
+                              TextButton(
+                                style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: Size.zero),
+                                onPressed: () {
+                                  final rem = SourceCurriculumEngine.buildTargetedWeaknessLesson(folder, singleTopic: tm.topic);
+                                  if (rem != null) {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => LessonPlayerScreen(
+                                          controller: c,
+                                          lesson: rem,
+                                          isTargetedRemediation: true,
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                                child: const Text('🎯 تدرب', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: BatchColors.teal)),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+              ],
+            ),
+          ),
+        ),
+
         Card(
           child: Padding(
             padding: const EdgeInsets.all(12),
@@ -168,7 +348,7 @@ class AnalyticsTab extends StatelessWidget {
                 ],
                 FilledButton(
                   onPressed: () {
-                    final adj = McqParser.smartBalanceAnswers(c.folder.questions);
+                    final adj = McqParser.smartBalanceAnswers(folder.questions);
                     c.save();
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('تم إعادة توزيع $adj سؤال بتوازن ذكي ⚖️')),
@@ -203,6 +383,25 @@ class AnalyticsTab extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _kpiBadge(String label, String val, Color col) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: BatchColors.navy2,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: col.withOpacity(0.7)),
+        ),
+        child: Column(
+          children: [
+            Text(val, style: TextStyle(color: col, fontSize: 17, fontWeight: FontWeight.w900)),
+            Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w700)),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -350,8 +350,9 @@ class _FlashcardsTabState extends State<FlashcardsTab> {
                       children: [
                         OutlinedButton(
                           onPressed: () {
-                            deck[_idx].status = 'learning';
-                            c.save();
+                            final card = deck[_idx];
+                            card.status = 'learning';
+                            c.recordTopicAttempt(card.topic, isCorrect: false, isFlashcard: true, citation: card.sourceCitation);
                             setState(() {
                               _flipped = false;
                               _idx = (_idx + 1) % deck.length;
@@ -361,8 +362,9 @@ class _FlashcardsTabState extends State<FlashcardsTab> {
                         ),
                         FilledButton.tonal(
                           onPressed: () {
-                            deck[_idx].status = 'review';
-                            c.save();
+                            final card = deck[_idx];
+                            card.status = 'review';
+                            c.recordTopicAttempt(card.topic, isCorrect: true, isFlashcard: true, citation: card.sourceCitation);
                             setState(() {
                               _flipped = false;
                               _idx = (_idx + 1) % deck.length;
@@ -372,9 +374,10 @@ class _FlashcardsTabState extends State<FlashcardsTab> {
                         ),
                         FilledButton(
                           onPressed: () {
-                            deck[_idx].status = 'mastered';
+                            final card = deck[_idx];
+                            card.status = 'mastered';
                             c.playSound('correct');
-                            c.save();
+                            c.recordTopicAttempt(card.topic, isCorrect: true, isFlashcard: true, citation: card.sourceCitation);
                             setState(() {
                               _flipped = false;
                               _idx = (_idx + 1) % deck.length;

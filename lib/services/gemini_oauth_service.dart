@@ -285,7 +285,22 @@ class GeminiOAuthService {
     return newAccess;
   }
 
-  Future<Map<String, dynamic>> callGeminiJson(String systemPrompt, String userText) async {
+  Future<Map<String, dynamic>> callGeminiJson(String systemPrompt, String userText) {
+    return callGeminiChatJson(systemPrompt, [
+      {
+        'role': 'user',
+        'parts': [
+          {'text': userText}
+        ]
+      }
+    ]);
+  }
+
+  Future<Map<String, dynamic>> callGeminiChatJson(
+    String systemPrompt,
+    List<Map<String, dynamic>> contents, {
+    double temperature = 0.25,
+  }) async {
     final token = await _ensureValidToken();
     final safeModel = config.model.trim().isEmpty ? 'gemini-2.5-flash' : config.model.trim();
     final headers = <String, String>{
@@ -306,21 +321,14 @@ class GeminiOAuthService {
                 {'text': systemPrompt}
               ]
             },
-            'contents': [
-              {
-                'role': 'user',
-                'parts': [
-                  {'text': userText}
-                ]
-              }
-            ],
+            'contents': contents,
             'generationConfig': {
-              'temperature': 0.2,
+              'temperature': temperature,
               'responseMimeType': 'application/json',
             },
           }),
         )
-        .timeout(const Duration(seconds: 65));
+        .timeout(const Duration(seconds: 75));
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception('خطأ من Gemini API (${res.statusCode}): ${_extractError(res.body)}');
@@ -393,6 +401,245 @@ class GeminiOAuthService {
       }
     }
     return LectureAnalysisResult(qs.where((q) => q.stem.isNotEmpty).toList(), fcs);
+  }
+
+  Future<List<MicroLesson>> generateMicroCurriculum(
+    AppDataState appState,
+    List<SourceChunk> chunks, {
+    required String sourceName,
+    String language = 'bilingual',
+  }) async {
+    final buf = StringBuffer();
+    for (final c in chunks.take(18)) {
+      buf.writeln('[${c.citation}] ${c.sectionTitle}');
+      buf.writeln(c.text);
+      buf.writeln('---');
+      if (buf.length > 26000) break;
+    }
+
+    final langRule = switch (language) {
+      'ar' => 'Explain objectives, summaries, rationales, and hints in clear Arabic while keeping accurate English medical/technical terminology in parentheses.',
+      'en' => 'Write all lessons, quizzes, rationales, flashcards, and games in crisp clinical English matching the source.',
+      _ => 'Write concise bilingual explanations (clear Arabic explanations paired with exact English technical terminology from the source).',
+    };
+
+    final sysPrompt =
+        'You are the LearnKata AI Curriculum Architect. Transform the provided source chunks into 3 to 6 sequential, bite-sized Micro-Lessons (Duolingo-style roadmap). '
+        'STRICT GROUNDING: Every fact, MCQ, flashcard, match pair, and fill-in-the-blank MUST be 100% grounded in the provided chunks with exact "sourceCitation" (copied verbatim from [Citation]). Never invent outside facts or metadata slides (ignore cover/author/references). '
+        '$langRule '
+        'Return ONLY valid JSON: '
+        '{"lessons":[{'
+        '"title":"...",'
+        '"topic":"...",'
+        '"objective":"One clear actionable learning objective",'
+        '"summary":"Concise 2-4 sentence concept summary",'
+        '"keyTakeaways":["point 1","point 2","point 3"],'
+        '"sourceCitation":"...",'
+        '"sourceExcerpt":"short verbatim quote from source",'
+        '"estimatedMinutes":4,'
+        '"quizzes":[{"stem":"...","options":["A","B","C","D"],"answerIndex":0,"optionRationales":["Why A is right/wrong","Why B is right/wrong","Why C is right/wrong","Why D is right/wrong"],"explanation":"...","citation":"..."}],'
+        '"flashcards":[{"front":"...","back":"...","hint":"...","citation":"..."}],'
+        '"matchPairs":[{"left":"Term","right":"Mechanism/Definition","citation":"..."}],'
+        '"fillBlanks":[{"sentenceWithBlank":"Sentence containing _____ blank","answer":"missing term","choices":["missing term","distractor 1","distractor 2"],"hint":"...","citation":"..."}]'
+        '}]}';
+
+    final res = await callGeminiJson(sysPrompt, 'Course Source: $sourceName\n\n$buf', );
+    final rawLessons = res['lessons'] as List? ?? [];
+    final out = <MicroLesson>[];
+    for (var i = 0; i < rawLessons.length; i++) {
+      final ml = rawLessons[i];
+      if (ml is! Map) continue;
+      final topic = ml['topic']?.toString().trim() ?? sourceName;
+      final cite = ml['sourceCitation']?.toString().trim() ?? (chunks.isNotEmpty ? chunks.first.citation : sourceName);
+
+      final quizzes = <McqQuestion>[];
+      for (final rq in (ml['quizzes'] as List? ?? [])) {
+        if (rq is! Map) continue;
+        final opts = (rq['options'] as List?)?.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).take(5).toList() ?? [];
+        if (opts.length < 2) continue;
+        var ans = (rq['answerIndex'] as num?)?.toInt() ?? 0;
+        if (ans < 0 || ans >= opts.length) ans = 0;
+        final rats = (rq['optionRationales'] as List?)?.map((e) => e.toString().trim()).toList() ?? <String>[];
+        final q = McqParser.buildQuestion(
+          appState,
+          sourceNum: quizzes.length + 1,
+          sourceName: sourceName,
+          stem: rq['stem']?.toString().trim() ?? '',
+          options: opts,
+          answerIndices: [ans],
+          explicitTopic: topic,
+          explanation: rq['explanation']?.toString().trim() ?? '',
+        );
+        q.sourceCitation = rq['citation']?.toString().trim().isNotEmpty == true ? rq['citation'].toString().trim() : cite;
+        q.optionRationales = rats;
+        if (q.stem.isNotEmpty) quizzes.add(q);
+      }
+
+      final flashcards = <FlashcardItem>[];
+      for (final rf in (ml['flashcards'] as List? ?? [])) {
+        if (rf is! Map) continue;
+        final f = rf['front']?.toString().trim() ?? '';
+        final b = rf['back']?.toString().trim() ?? '';
+        if (f.isNotEmpty && b.isNotEmpty) {
+          flashcards.add(FlashcardItem(
+            uid: appState.nextCardUid++,
+            front: f,
+            back: b,
+            hint: rf['hint']?.toString().trim() ?? topic,
+            topic: topic,
+            sourceCitation: rf['citation']?.toString().trim() ?? cite,
+          ));
+        }
+      }
+
+      final pairs = <MatchPairItem>[];
+      for (var pi = 0; pi < (ml['matchPairs'] as List? ?? []).length; pi++) {
+        final rp = (ml['matchPairs'] as List)[pi];
+        if (rp is! Map) continue;
+        final l = rp['left']?.toString().trim() ?? '';
+        final r = rp['right']?.toString().trim() ?? '';
+        if (l.isNotEmpty && r.isNotEmpty) {
+          pairs.add(MatchPairItem(
+            id: 'mp_${i}_$pi',
+            left: l,
+            right: r,
+            citation: rp['citation']?.toString().trim() ?? cite,
+          ));
+        }
+      }
+
+      final blanks = <FillBlankItem>[];
+      for (var bi = 0; bi < (ml['fillBlanks'] as List? ?? []).length; bi++) {
+        final rb = (ml['fillBlanks'] as List)[bi];
+        if (rb is! Map) continue;
+        final sent = rb['sentenceWithBlank']?.toString().trim() ?? '';
+        final ans = rb['answer']?.toString().trim() ?? '';
+        final choices = (rb['choices'] as List?)?.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList() ?? [];
+        if (ans.isNotEmpty && !choices.contains(ans)) choices.insert(0, ans);
+        if (sent.isNotEmpty && ans.isNotEmpty && choices.isNotEmpty) {
+          blanks.add(FillBlankItem(
+            id: 'fb_${i}_$bi',
+            sentenceWithBlank: sent,
+            answer: ans,
+            choices: choices,
+            hint: rb['hint']?.toString().trim() ?? topic,
+            citation: rb['citation']?.toString().trim() ?? cite,
+          ));
+        }
+      }
+
+      out.add(MicroLesson(
+        id: 'ml_${DateTime.now().microsecondsSinceEpoch}_$i',
+        orderIndex: i,
+        title: ml['title']?.toString().trim() ?? 'Lesson ${i + 1}: $topic',
+        topic: topic,
+        objective: ml['objective']?.toString().trim() ?? 'Master core mechanisms of $topic',
+        summary: ml['summary']?.toString().trim() ?? '',
+        keyTakeaways: (ml['keyTakeaways'] as List?)?.map((e) => e.toString()).toList() ?? [],
+        sourceCitation: cite,
+        sourceExcerpt: ml['sourceExcerpt']?.toString().trim() ?? (chunks.isNotEmpty ? chunks.first.text : ''),
+        estimatedMinutes: (ml['estimatedMinutes'] as num?)?.toInt() ?? 4,
+        quizzes: quizzes,
+        flashcards: flashcards,
+        matchPairs: pairs,
+        fillBlanks: blanks,
+      ));
+    }
+    return out;
+  }
+
+  Future<TutorMessage> askSocraticTutor({
+    required List<TutorMessage> history,
+    required String userMessage,
+    required List<SourceChunk> citedChunks,
+    MicroLesson? activeLesson,
+    String? wrongQuestionContext,
+    String language = 'bilingual',
+  }) async {
+    final srcBuf = StringBuffer();
+    if (activeLesson != null) {
+      srcBuf.writeln('ACTIVE LESSON: ${activeLesson.title} [${activeLesson.sourceCitation}]');
+      srcBuf.writeln('OBJECTIVE: ${activeLesson.objective}');
+      if (activeLesson.sourceExcerpt.isNotEmpty) {
+        srcBuf.writeln('LESSON EXCERPT: ${activeLesson.sourceExcerpt}');
+      }
+      srcBuf.writeln('---');
+    }
+    for (final c in citedChunks) {
+      srcBuf.writeln('[${c.citation}] ${c.text}');
+      srcBuf.writeln('---');
+    }
+    if (wrongQuestionContext != null && wrongQuestionContext.trim().isNotEmpty) {
+      srcBuf.writeln('STUDENT CURRENT STRUGGLE / WRONG ATTEMPT: $wrongQuestionContext');
+    }
+
+    final langInstr = switch (language) {
+      'ar' => 'Respond in clear, encouraging Arabic while preserving exact English medical/scientific terminology in parentheses.',
+      'en' => 'Respond in crisp, encouraging clinical English.',
+      _ => 'Respond in clear Arabic paired with key English medical terminology (bilingual), matching how medical students study.',
+    };
+
+    final sysPrompt =
+        'You are the LearnKata Step-by-Step Socratic AI Tutor. '
+        'CRITICAL PEDAGOGICAL RULES: '
+        '1. TEACH, NEVER JUST DUMP THE ANSWER: When a student asks for help on a concept or got a quiz question wrong, DO NOT immediately give away the final letter/answer. '
+        '2. Guide step-by-step using a relatable analogy or physiological hint, followed by ONE focused leading question prompting the student to reason out the next step. '
+        '3. If the student clearly demonstrates understanding or explicitly asks after trying, affirm why it is correct. '
+        '4. STRICT SOURCE GROUNDING & CITATIONS: Base EVERY claim strictly on the provided source chunks below. Cite exact source references from [brackets]. If the uploaded material does not contain an answer, say so honestly instead of hallucinating. '
+        '5. $langInstr '
+        'Return ONLY valid JSON: '
+        '{"reply":"Your Socratic guidance + analogy + leading question ending smoothly","citations":["exact citation string 1"],"suggestedPrompt":"short helpful student reply chip e.g. أتوقع السبب هو..."}';
+
+    final contents = <Map<String, dynamic>>[];
+    contents.add({
+      'role': 'user',
+      'parts': [
+        {'text': 'GROUNDED STUDY MATERIAL:\n$srcBuf'}
+      ]
+    });
+    contents.add({
+      'role': 'model',
+      'parts': [
+        {
+          'text': jsonEncode({
+            'reply': 'أنا جاهز لمساعدتك خطوة بخطوة بالاعتماد على مصادرك المرفوعة فقط.',
+            'citations': citedChunks.map((e) => e.citation).take(2).toList(),
+            'suggestedPrompt': 'أعطني تلميحاً فقط',
+          })
+        }
+      ]
+    });
+    for (final m in history.take(10)) {
+      contents.add({
+        'role': m.role == 'user' ? 'user' : 'model',
+        'parts': [
+          {
+            'text': m.role == 'user'
+                ? m.text
+                : jsonEncode({
+                    'reply': m.text,
+                    'citations': m.citations,
+                    'suggestedPrompt': m.suggestedPrompt ?? '',
+                  })
+          }
+        ]
+      });
+    }
+    contents.add({
+      'role': 'user',
+      'parts': [
+        {'text': userMessage}
+      ]
+    });
+
+    final res = await callGeminiChatJson(sysPrompt, contents, temperature: 0.35);
+    return TutorMessage(
+      role: 'tutor',
+      text: res['reply']?.toString().trim() ?? 'فكر معي في الآلية الأساسية داخل المقطع المقتبس، ما الخطوة الأولى التي تحدث؟',
+      citations: (res['citations'] as List?)?.map((e) => e.toString()).where((e) => e.isNotEmpty).toList() ??
+          citedChunks.take(2).map((e) => e.citation).toList(),
+      suggestedPrompt: res['suggestedPrompt']?.toString().trim(),
+    );
   }
 
   String _extractError(String body) {

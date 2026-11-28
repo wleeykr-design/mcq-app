@@ -6,13 +6,15 @@ import '../services/gemini_oauth_service.dart';
 import '../services/lecture_analyzer.dart';
 import '../services/mcq_parser.dart';
 import '../services/native_bridge.dart';
+import '../services/source_curriculum_engine.dart';
 import '../services/storage_service.dart';
 
 class AppController extends ChangeNotifier {
   AppDataState data = AppDataState();
   final GeminiOAuthService gemini = GeminiOAuthService();
 
-  int currentTabIndex = 0; // 0: bank, 1: studyPlan, 2: quiz, 3: flashcards, 4: sheet, 5: analytics, 6: export
+  // 0: bank, 1: studyPlan, 2: quiz, 3: flashcards, 4: sheet, 5: analytics/mastery, 6: export, 7: socraticTutor
+  int currentTabIndex = 1;
   bool loaded = false;
   bool busy = false;
   String? lastAuthMessage;
@@ -88,6 +90,11 @@ class AppController extends ChangeNotifier {
     save();
   }
 
+  void setTutorLanguage(String lang) {
+    data.tutorLanguage = lang;
+    save();
+  }
+
   SubjectFolder get folder => data.activeFolder;
 
   void switchFolder(String id) {
@@ -131,9 +138,267 @@ class AppController extends ChangeNotifier {
     folder.cases.clear();
     folder.flashcards.clear();
     folder.lastWrongIds.clear();
+    folder.sources.clear();
+    folder.lessons.clear();
+    folder.topicMastery.clear();
+    folder.tutorHistory.clear();
     save();
   }
 
+  // ===========================================================================
+  // LEARNKATA SOURCE-GROUNDED CURRICULUM INGESTION
+  // ===========================================================================
+  Future<String> ingestLearnKataMaterial({
+    required String sourceName,
+    required String rawText,
+    String fileType = 'text',
+    bool useGemini = false,
+    bool replaceRoadmap = false,
+  }) async {
+    if (rawText.trim().length < 25) {
+      throw Exception('المحتوى قصير جداً لبناء خطة دروس مترابطة.');
+    }
+    busy = true;
+    notifyListeners();
+    try {
+      if (replaceRoadmap) {
+        folder.lessons.clear();
+        folder.sources.clear();
+      }
+      final res = await SourceCurriculumEngine.ingestSource(
+        appState: data,
+        gemini: gemini,
+        sourceName: sourceName,
+        rawText: rawText,
+        fileType: fileType,
+        preferGemini: useGemini,
+        startingOrderIndex: folder.lessons.length,
+      );
+
+      folder.sources.add(res.document);
+      folder.lessons.addAll(res.lessons);
+
+      final existingQ = folder.questions.map((q) => McqParser.normalizeStem(q.stem)).toSet();
+      for (final q in res.bankQuestions) {
+        final k = McqParser.normalizeStem(q.stem);
+        if (k.isNotEmpty && existingQ.add(k)) {
+          folder.questions.add(q);
+        }
+      }
+
+      final existingFc = folder.flashcards.map((c) => McqParser.normalizeStem(c.front)).toSet();
+      for (final fc in res.flashcards) {
+        final k = McqParser.normalizeStem(fc.front);
+        if (k.isNotEmpty && existingFc.add(k)) {
+          folder.flashcards.add(fc);
+        }
+      }
+
+      data.xp += 15;
+      data.dailyXp += 15;
+      playSound('correct');
+      await save();
+      final modeLabel = res.usedAi ? '✨ بالذكاء الاصطناعي Gemini' : '⚡ بالمحلل المحلي الموثق';
+      return '🎓 تم بناء ${res.lessons.length} دروس مصغرة ($modeLabel) مع مراجع المصدر في "${folder.name}"!';
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<String> pickAndIngestLearnKata({bool useGemini = false, bool replaceRoadmap = false}) async {
+    final files = await NativeBridge.pickFiles(allowMultiple: true);
+    if (files.isEmpty) return '';
+
+    busy = true;
+    notifyListeners();
+    var builtLessons = 0;
+    var usedAiAny = false;
+    final errors = <String>[];
+
+    try {
+      if (replaceRoadmap) {
+        folder.lessons.clear();
+        folder.sources.clear();
+      }
+      for (final file in files) {
+        try {
+          final text = await FileExtractor.extractText(file.name, file.bytes);
+          final ext = file.name.contains('.') ? file.name.split('.').last.toLowerCase() : 'text';
+          final res = await SourceCurriculumEngine.ingestSource(
+            appState: data,
+            gemini: gemini,
+            sourceName: file.name,
+            rawText: text,
+            fileType: ext,
+            preferGemini: useGemini,
+            startingOrderIndex: folder.lessons.length,
+          );
+          if (res.usedAi) usedAiAny = true;
+          folder.sources.add(res.document);
+          folder.lessons.addAll(res.lessons);
+          builtLessons += res.lessons.length;
+
+          final existingQ = folder.questions.map((q) => McqParser.normalizeStem(q.stem)).toSet();
+          for (final q in res.bankQuestions) {
+            if (existingQ.add(McqParser.normalizeStem(q.stem))) {
+              folder.questions.add(q);
+            }
+          }
+          final existingFc = folder.flashcards.map((c) => McqParser.normalizeStem(c.front)).toSet();
+          for (final fc in res.flashcards) {
+            if (existingFc.add(McqParser.normalizeStem(fc.front))) {
+              folder.flashcards.add(fc);
+            }
+          }
+        } catch (e) {
+          errors.add('${file.name}: $e');
+        }
+      }
+    } finally {
+      busy = false;
+    }
+
+    if (builtLessons > 0) {
+      data.xp += 15;
+      data.dailyXp += 15;
+      playSound('correct');
+      await save();
+      return '🎓 تم توليد $builtLessons درس LearnKata تفاعلي${usedAiAny ? " (Gemini)" : ""} في "${folder.name}"!';
+    }
+    notifyListeners();
+    if (errors.isNotEmpty) throw Exception(errors.join('\n'));
+    return 'تعذر استخراج دروس من الملف المختار.';
+  }
+
+  void ensureRoadmapSyncedFromQuestions() {
+    if (folder.lessons.isEmpty && folder.questions.isNotEmpty) {
+      folder.lessons = SourceCurriculumEngine.buildFromRawQuestions(
+        folder,
+        unitSize: data.spUnitSize > 0 ? data.spUnitSize : 6,
+      );
+      save();
+    }
+  }
+
+  // ===========================================================================
+  // MASTERY TRACKING & LESSON COMPLETION
+  // ===========================================================================
+  void recordTopicAttempt(
+    String topic, {
+    required bool isCorrect,
+    bool isFlashcard = false,
+    bool isGame = false,
+    String? citation,
+  }) {
+    final cleanTopic = topic.trim().isEmpty ? 'General Medicine' : topic.trim();
+    final stat = folder.topicMastery.putIfAbsent(cleanTopic, () => TopicMastery(topic: cleanTopic));
+    stat.record(isCorrect: isCorrect, isFlashcard: isFlashcard, isGame: isGame, citation: citation);
+    save();
+  }
+
+  Future<void> completeMicroLesson(
+    MicroLesson lesson, {
+    required int quizPct,
+    required bool didFlashcards,
+    required bool didGame,
+  }) async {
+    lesson.completed = true;
+    if (quizPct > lesson.bestQuizPct) lesson.bestQuizPct = quizPct;
+    if (didGame) lesson.gameCompleted = true;
+    final stars = quizPct >= 85 && didGame ? 3 : (quizPct >= 60 ? 2 : 1);
+    if (stars > lesson.stars) lesson.stars = stars;
+
+    // Also update legacy StudyUnitProgress map for full continuity
+    data.studyProgress[lesson.id] = StudyUnitProgress(
+      stars: lesson.stars,
+      bestPct: lesson.bestQuizPct,
+      attempts: (data.studyProgress[lesson.id]?.attempts ?? 0) + 1,
+    );
+
+    data.syncDailyReset();
+    final gain = 25 + (didGame ? 10 : 0) + (didFlashcards ? 5 : 0);
+    data.xp += gain;
+    data.dailyXp += gain;
+
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    if (data.lastStudyDay != today) {
+      data.lastStudyDay = today;
+      data.streak += 1;
+    }
+
+    playSound('correct');
+    await save();
+  }
+
+  // ===========================================================================
+  // STEP-BY-STEP SOCRATIC AI TUTOR
+  // ===========================================================================
+  Future<TutorMessage> sendTutorMessage(
+    String userText, {
+    MicroLesson? activeLesson,
+    String? wrongQuestionContext,
+  }) async {
+    final clean = userText.trim();
+    if (clean.isEmpty) {
+      throw Exception('اكتب سؤالك للمعلم أولاً.');
+    }
+
+    folder.tutorHistory.add(TutorMessage(role: 'user', text: clean));
+    notifyListeners();
+
+    final citedChunks = SourceCurriculumEngine.retrieveRelevantChunks(
+      folder,
+      '$clean ${wrongQuestionContext ?? ""}',
+      activeLesson: activeLesson,
+      topK: 4,
+    );
+
+    TutorMessage reply;
+    if (gemini.config.isSignedIn && citedChunks.isNotEmpty) {
+      try {
+        reply = await gemini.askSocraticTutor(
+          history: folder.tutorHistory.where((m) => m.text != clean).toList(),
+          userMessage: clean,
+          citedChunks: citedChunks,
+          activeLesson: activeLesson,
+          wrongQuestionContext: wrongQuestionContext,
+          language: data.tutorLanguage,
+        );
+      } catch (_) {
+        reply = SourceCurriculumEngine.respondOfflineSocratic(
+          history: folder.tutorHistory,
+          userMessage: clean,
+          citedChunks: citedChunks,
+          activeLesson: activeLesson,
+          wrongQuestionContext: wrongQuestionContext,
+          language: data.tutorLanguage,
+        );
+      }
+    } else {
+      reply = SourceCurriculumEngine.respondOfflineSocratic(
+        history: folder.tutorHistory,
+        userMessage: clean,
+        citedChunks: citedChunks,
+        activeLesson: activeLesson,
+        wrongQuestionContext: wrongQuestionContext,
+        language: data.tutorLanguage,
+      );
+    }
+
+    folder.tutorHistory.add(reply);
+    await save();
+    return reply;
+  }
+
+  void clearTutorHistory() {
+    folder.tutorHistory.clear();
+    save();
+  }
+
+  // ===========================================================================
+  // EXISTING IMPORT / BANK TOOLS (Preserved + Synced with Citations & LearnKata)
+  // ===========================================================================
   Future<String> importPickedFiles({bool forceSheet = false, bool useGemini = false}) async {
     final files = await NativeBridge.pickFiles(allowMultiple: true);
     if (files.isEmpty) return '';
@@ -153,12 +418,22 @@ class AppController extends ChangeNotifier {
         final bytes = file.bytes;
         try {
           final text = await FileExtractor.extractText(file.name, bytes);
+          final chunks = FileExtractor.parseTextIntoChunks(file.name, text);
+          if (chunks.isNotEmpty) {
+            folder.sources.add(SourceDocument(
+              id: 'src_${DateTime.now().microsecondsSinceEpoch}',
+              name: file.name,
+              fileType: file.name.split('.').last.toLowerCase(),
+              chunks: chunks,
+            ));
+          }
 
           if (useGemini) {
             final aiRes = await gemini.generateFromLecture(data, text, sourceName: file.name);
             for (final q in aiRes.questions) {
               final k = McqParser.normalizeStem(q.stem);
               if (k.isNotEmpty && existingQ.add(k)) {
+                q.sourceCitation = file.name;
                 folder.questions.add(q);
                 addedMcq++;
               }
@@ -172,6 +447,7 @@ class AppController extends ChangeNotifier {
                   back: fc.back,
                   hint: fc.hint,
                   topic: fc.topic,
+                  sourceCitation: file.name,
                 ));
                 addedFc++;
               }
@@ -200,6 +476,7 @@ class AppController extends ChangeNotifier {
                   back: fc.back,
                   hint: fc.hint,
                   topic: fc.topic,
+                  sourceCitation: file.name,
                 ));
                 addedFc++;
               }
@@ -208,12 +485,26 @@ class AppController extends ChangeNotifier {
               for (final q in gen.questions) {
                 final k = McqParser.normalizeStem(q.stem);
                 if (k.isNotEmpty && existingQ.add(k)) {
+                  q.sourceCitation = file.name;
                   folder.questions.add(q);
                   addedMcq++;
                 }
               }
             } else {
               addedFc += convertMcqsToFlashcards(bundle.questions);
+            }
+            // Also populate LearnKata micro-lessons automatically from the extracted sheet!
+            if (chunks.isNotEmpty) {
+              final newLessons = SourceCurriculumEngine.buildOfflineMicroLessons(
+                data,
+                chunks,
+                rawText: text,
+                sourceName: file.name,
+              );
+              for (var li = 0; li < newLessons.length; li++) {
+                newLessons[li].orderIndex = folder.lessons.length + li;
+              }
+              folder.lessons.addAll(newLessons);
             }
           }
         } catch (e) {
@@ -224,14 +515,14 @@ class AppController extends ChangeNotifier {
       busy = false;
     }
 
-    if (addedMcq > 0 || addedCases > 0 || addedFc > 0) {
+    if (addedMcq > 0 || addedCases > 0 || addedFc > 0 || folder.lessons.isNotEmpty) {
       playSound('correct');
       await save();
       final parts = <String>[];
       if (addedMcq > 0) parts.add('$addedMcq سؤال MCQ');
       if (addedCases > 0) parts.add('$addedCases حالة');
       if (addedFc > 0) parts.add('$addedFc فلاش كارد');
-      return '✨ تم استخراج ${parts.join(' + ')} في "${folder.name}"!';
+      return '✨ تم استخراج ${parts.isNotEmpty ? parts.join(' + ') : "المحتوى"} في "${folder.name}"!';
     }
     notifyListeners();
     if (errors.isNotEmpty) throw Exception(errors.join('\n'));
@@ -309,6 +600,7 @@ class AppController extends ChangeNotifier {
         back: back,
         hint: q.topic,
         topic: q.topic,
+        sourceCitation: q.sourceCitation,
       ));
       added++;
     }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../state/app_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/gemini_auth_dialog.dart';
+import '../widgets/socratic_tutor_sheet.dart';
 import 'bank_tab.dart';
 import 'flashcards_tab.dart';
 import 'more_tabs.dart';
@@ -23,7 +24,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(milliseconds: 1600), () {
+    Timer(const Duration(milliseconds: 1400), () {
       if (mounted) setState(() => _showSplash = false);
     });
   }
@@ -69,9 +70,7 @@ class _HomeShellState extends State<HomeShell> {
                                 color: colorHex == hex ? Colors.white : Colors.transparent,
                                 width: 2.5,
                               ),
-                              boxShadow: colorHex == hex
-                                  ? [BoxShadow(color: parseHexColor(hex), blurRadius: 6)]
-                                  : null,
+                              boxShadow: colorHex == hex ? [BoxShadow(color: parseHexColor(hex), blurRadius: 6)] : null,
                             ),
                           ),
                         ))
@@ -118,13 +117,19 @@ class _HomeShellState extends State<HomeShell> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('أدوات إضافية', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+            const Text('أدوات LearnKata والمتابعة', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
             const SizedBox(height: 12),
             Row(
               children: [
-                _moreTile(ctx, '✅', 'مصحح الأجوبة', 4),
+                _moreTile(ctx, '🧠', 'المعلم السقراطي', 7),
                 const SizedBox(width: 8),
-                _moreTile(ctx, '📊', 'الإحصائيات والتوازن', 5),
+                _moreTile(ctx, '🎯', 'القوة والضعف', 5),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _moreTile(ctx, '✅', 'مصحح الأجوبة', 4),
                 const SizedBox(width: 8),
                 _moreTile(ctx, '📤', 'التصدير والنسخ', 6),
               ],
@@ -194,7 +199,8 @@ class _HomeShellState extends State<HomeShell> {
           3 => FlashcardsTab(controller: c),
           4 => SheetGraderTab(controller: c),
           5 => AnalyticsTab(controller: c),
-          _ => ExportBackupTab(controller: c),
+          6 => ExportBackupTab(controller: c),
+          _ => SocraticTutorPanel(controller: c),
         };
 
         return Stack(
@@ -221,7 +227,7 @@ class _HomeShellState extends State<HomeShell> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('Batch 27 — MCQ', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                          Text('Batch 27 — LearnKata', style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800)),
                           Text('كلية الطب والعلوم الصحية', style: TextStyle(fontSize: 10.5, color: Colors.white70)),
                         ],
                       ),
@@ -229,41 +235,35 @@ class _HomeShellState extends State<HomeShell> {
                   ],
                 ),
                 actions: [
+                  IconButton(
+                    tooltip: 'المعلم السقراطي',
+                    onPressed: () => openSocraticTutorSheet(context, controller: c),
+                    icon: const Text('🧠', style: TextStyle(fontSize: 19)),
+                  ),
                   TextButton(
                     onPressed: _openGeminiDialog,
                     style: TextButton.styleFrom(
                       foregroundColor: c.gemini.config.isSignedIn ? const Color(0xFF6EE7B7) : Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
                     ),
-                    child: Text(c.gemini.config.isSignedIn ? '✨ Gemini ✅' : '✨ Gemini',
+                    child: Text(c.gemini.config.isSignedIn ? '✨ ✅' : '✨ AI',
                         style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
                   ),
                   IconButton(
                     tooltip: c.data.soundEnabled ? 'الأصوات: شغالة' : 'الأصوات: مكتومة',
                     onPressed: c.toggleSound,
-                    icon: Icon(c.data.soundEnabled ? Icons.volume_up : Icons.volume_off, size: 20),
+                    icon: Icon(c.data.soundEnabled ? Icons.volume_up : Icons.volume_off, size: 19),
                   ),
                   IconButton(
                     tooltip: 'الوضع الليلي',
                     onPressed: c.toggleTheme,
-                    icon: Icon(c.data.darkMode ? Icons.light_mode : Icons.dark_mode, size: 20),
-                  ),
-                  IconButton(
-                    tooltip: 'تفريغ المجلد',
-                    onPressed: () {
-                      c.clearActiveFolder();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('تم تفريغ مجلد "${folder.name}" 🗑️')),
-                      );
-                    },
-                    icon: const Icon(Icons.delete_outline, size: 20),
+                    icon: Icon(c.data.darkMode ? Icons.light_mode : Icons.dark_mode, size: 19),
                   ),
                 ],
               ),
               body: Column(
                 children: [
                   if (c.busy) const LinearProgressIndicator(minHeight: 3),
-                  // Subject Folders Strip
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
@@ -274,7 +274,7 @@ class _HomeShellState extends State<HomeShell> {
                       children: [
                         Row(
                           children: [
-                            const Text('📁 المجلدات:', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                            const Text('📁 المادة:', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                             const SizedBox(width: 6),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
@@ -296,6 +296,16 @@ class _HomeShellState extends State<HomeShell> {
                               icon: const Icon(Icons.edit_outlined, size: 18),
                               tooltip: 'تعديل المجلد',
                             ),
+                            IconButton(
+                              tooltip: 'تفريغ المجلد',
+                              onPressed: () {
+                                c.clearActiveFolder();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('تم تفريغ مجلد "${folder.name}" 🗑️')),
+                                );
+                              },
+                              icon: const Icon(Icons.delete_outline, size: 18),
+                            ),
                           ],
                         ),
                         SizedBox(
@@ -310,12 +320,8 @@ class _HomeShellState extends State<HomeShell> {
                               final col = parseHexColor(f.colorHex);
                               return ChoiceChip(
                                 selected: active,
-                                label: Text('${f.name} (${f.questions.length})',
-                                    style: TextStyle(
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: active ? Colors.white : null,
-                                    )),
+                                label: Text('${f.name} (${f.lessons.length} درس)',
+                                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: active ? Colors.white : null)),
                                 selectedColor: col,
                                 onSelected: (_) => c.switchFolder(f.id),
                               );
@@ -340,9 +346,16 @@ class _HomeShellState extends State<HomeShell> {
                 destinations: [
                   NavigationDestination(
                     icon: Badge(label: Text('${folder.questions.length}'), child: const Icon(Icons.inventory_2_outlined)),
-                    label: 'الأسئلة',
+                    label: 'المصادر والبنك',
                   ),
-                  const NavigationDestination(icon: Icon(Icons.school_outlined), label: 'الخطة'),
+                  NavigationDestination(
+                    icon: Badge(
+                      isLabelVisible: folder.lessons.isNotEmpty,
+                      label: Text('${folder.lessons.length}'),
+                      child: const Icon(Icons.route_rounded),
+                    ),
+                    label: 'مسار التعلم',
+                  ),
                   NavigationDestination(
                     icon: Badge(
                       isLabelVisible: dueCount > 0,
@@ -355,7 +368,7 @@ class _HomeShellState extends State<HomeShell> {
                     icon: Badge(label: Text('${folder.flashcards.length}'), child: const Icon(Icons.style_outlined)),
                     label: 'فلاش كاردز',
                   ),
-                  const NavigationDestination(icon: Icon(Icons.more_horiz), label: 'المزيد'),
+                  const NavigationDestination(icon: Icon(Icons.grid_view_rounded), label: 'المزيد'),
                 ],
               ),
             ),
@@ -378,8 +391,8 @@ class _HomeShellState extends State<HomeShell> {
                         child: Image.asset('assets/images/logo.png', height: 110),
                       ),
                       const SizedBox(height: 14),
-                      const Text('Best of the Best',
-                          style: TextStyle(color: BatchColors.gold, fontSize: 16, fontWeight: FontWeight.w800, decoration: TextDecoration.none)),
+                      const Text('Best of the Best  •  LearnKata Engine',
+                          style: TextStyle(color: BatchColors.gold, fontSize: 15.5, fontWeight: FontWeight.w800, decoration: TextDecoration.none)),
                     ],
                   ),
                 ),
