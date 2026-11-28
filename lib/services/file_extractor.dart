@@ -67,8 +67,9 @@ class FileExtractor {
         final kind = mm.group(1)!;
         final num = mm.group(2)!;
         final heading = mm.group(3)!.trim();
-        curMarker = '$kind $num';
-        curTitle = heading.isNotEmpty ? heading : curMarker!;
+        final marker = '$kind $num';
+        curMarker = marker;
+        curTitle = heading.isNotEmpty ? heading : marker;
         continue;
       }
       final hm = mdHeadRe.firstMatch(l);
